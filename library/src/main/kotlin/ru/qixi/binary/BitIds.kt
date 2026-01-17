@@ -1,83 +1,120 @@
 package ru.qixi.binary
 
-import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption.READ
 import kotlin.io.path.exists
 
+/**
+ * Класс [BitIds] предоставляет высокоуровневый интерфейс для работы с битовым массивом,
+ * хранящимся в файле. Каждый бит в файле представляет наличие или отсутствие ID.
+ * Наследуется от [BinFile] для доступа к базовым операциям ввода-вывода.
+ *
+ * @param path Путь к файлу, где хранится битовый массив.
+ */
 class BitIds(path: Path) : BinFile(path) {
 
+    /**
+     * Ищет первый свободный идентификатор (первый нулевой бит в файле).
+     *
+     * @return Индекс первого нулевого бита. Если файл пуст, возвращает 0.
+     */
+    fun findFirstZeroId(): Int {
+        if (!path.exists()) return 0
+        return findFirstZeroBit()
+    }
+
+    /**
+     * Подсчитывает общее количество занятых ID (установленных битов со значением 1).
+     * Используется для получения общего числа существующих ID.
+     * Оптимизировано через аппаратный подсчет бит (POPCNT).
+     *
+     * @return Количество установленных битов (занятых ID).
+     * Возвращает 0, если файл не существует или пуст.
+     */
     fun readCount(): Int {
         if (!path.exists()) return 0
-        val file = RandomAccessFile(path.toFile(), "r")
-        var byte = file.read()
-        var count = 0
-        while (byte != -1) {
-            if (byte != 0) {
-                count += getTrueBitCount(byte)
-            }
-            byte = file.read()
-        }
-        file.close()
-        return count
-    }
-
-    private fun getTrueBitCount(flag: Int): Int {
-        var count = 0
-        for (pos in 0..7) {
-            val bit = (flag shr pos and 1)
-            if (bit == 1) {
-                count++
-            }
-        }
-        return count
-    }
-
-    fun updateBit(id: Int, flag: Boolean): Boolean {
-        if (id < 0) return false
-        val posByte = (id / 8).toLong()
-        //println("updateBit id:$id pos:$posByte [$flag] $path")
-        return if (path.exists()) {
-            val updated = modifyByte(posByte) { updateByte(id, it, flag) }
-            if (updated) println("modifyByte pos:$posByte $path")
-            updated
-        } else {
-            writeByte(posByte, updateByte(id, 0, flag))
-            flag
-        }
-    }
-
-    private fun updateByte(id: Int, byte: Int, flag: Boolean): Int {
-        return if (flag) setBit(byte, id) else unsetBit(byte, id)
-    }
-
-    fun readIds(): List<Int> {
-        if (!path.exists()) {
-            return listOf()
-        }
-        val file = RandomAccessFile(path.toFile(), "r")
-        var byte = file.read()
-        val list = mutableListOf<Int>()
-        var index = 0
-        while (byte != -1) {
-            if (byte != 0) {
-                for (posBit in 0..7) {
-                    if ((0x80 shr posBit or byte) == byte) {
-                        list.add(index)
-                    }
-                    index++
+        return FileChannel.open(path, READ).use { channel ->
+            val buffer = ByteBuffer.allocateDirect(DEFAULT_BUFFER_SIZE)
+            var totalCount = 0
+            while (channel.read(buffer) != -1) {
+                buffer.flip()
+                while (buffer.remaining() >= 8) {
+                    totalCount += buffer.long.countOneBits()
                 }
-            } else {
-                index += 8
+                while (buffer.hasRemaining()) {
+                    totalCount += (buffer.get().toInt() and 0xFF).countOneBits()
+                }
+                buffer.clear()
             }
-            byte = file.read()
+            totalCount
         }
-        file.close()
-        return list
     }
 
-    fun findFirstZeroId(): Long {
-        if (!path.exists()) return 0L
-        return findFirstZeroBit()
+    /**
+     * Проверяет, занят ли указанный ID (установлен ли соответствующий бит).
+     *
+     * @param [id] Изменяемый идентификатор.
+     * @return `true`, если бит установлен (ID занят); `false` в иных случаях.
+     */
+    fun contains(id: Int): Boolean {
+        if (!path.exists() || id < 0) return false
+        val position = (id / 8).toLong()
+        val byte = readByte(position)
+        if (byte == -1) return false
+        return isSetBit(byte, id)
+    }
+
+    /**
+     * Обновляет состояние бита для указанного [id].
+     * @param state true для установки в 1 (set), false для сброса в 0 (unset).
+     *
+     * @return true, если операция привела к изменению данных в файле.
+     */
+    fun update(id: Int, state: Boolean): Boolean {
+        if (id < 0) return false
+        val position = (id / 8).toLong()
+        return if (path.exists()) {
+            updateByte(position) { updateBit(id, it, state) }
+        } else {
+            writeByte(position, updateBit(id, 0, state))
+            true
+        }
+    }
+
+    /**
+     * Внутренняя функция для вычисления нового значения байта после изменения бита.
+     */
+    private inline fun updateBit(id: Int, byte: Int, state: Boolean): Int {
+        val mask = 0x80 shr (id % 8)
+        return if (state) byte or mask else byte and mask.inv()
+    }
+
+    /**
+     * Итерируется по всем занятым ID (установленным битам) в файле и вызывает [action] для каждого.
+     */
+    fun readIds(action: (Int) -> Unit) {
+        if (!path.exists()) return
+        FileChannel.open(path, READ).use { channel ->
+            val buffer = ByteBuffer.allocate(DEFAULT_BUFFER_SIZE)
+            var byteIndex = 0
+            while (channel.read(buffer) != -1) {
+                buffer.flip()
+                while (buffer.hasRemaining()) {
+                    val byte = buffer.get().toInt() and 0xFF
+                    if (byte != 0) {
+                        for (bitPos in 0..7) {
+                            if ((byte and (0x80 shr bitPos)) != 0) {
+                                action(byteIndex * 8 + bitPos)
+                            }
+                        }
+                    }
+                    byteIndex++
+                }
+                buffer.clear()
+            }
+        }
     }
 
 }
