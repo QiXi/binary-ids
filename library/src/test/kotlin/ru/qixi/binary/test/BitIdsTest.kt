@@ -92,7 +92,7 @@ internal class BitIdsTest {
         bitIds.update(1, true)
         // Пропускаем ID 2
         bitIds.update(3, true)
-
+        println(bitIds.readIds())
         assertEquals(2, bitIds.findFirstZeroId())
     }
 
@@ -101,13 +101,34 @@ internal class BitIdsTest {
         bitIds.update(0, true)
         assertEquals(1, bitIds.findFirstZeroId())
 
-        for (i in 0..7) bitIds.update(i, true)
-
+        for (i in 1..7) bitIds.update(i, true)
+        println(bitIds.readIds())
         assertEquals(8, bitIds.findFirstZeroId())
     }
 
     @Test
     fun `updateBit with negative id should return false`() {
         assertFalse(bitIds.update(-1, true))
+    }
+
+    @Test
+    fun `getId should return sequential IDs and mark them as used`() {
+        assertEquals(0, bitIds.getId())
+        assertEquals(1, bitIds.getId())
+        assertEquals(2, bitIds.getId())
+
+        assertTrue(bitIds.contains(0))
+        assertTrue(bitIds.contains(1))
+        assertTrue(bitIds.contains(2))
+
+        bitIds.update(1, false)
+
+        assertEquals(1, bitIds.getId())
+    }
+
+    @Test
+    fun `getId should expand file when all current bits are full`() {
+        repeat(8) { bitIds.getId() }
+        assertEquals(8, bitIds.getId())
     }
 }

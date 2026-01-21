@@ -3,7 +3,9 @@ package ru.qixi.binary
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption.CREATE
 import java.nio.file.StandardOpenOption.READ
+import java.nio.file.StandardOpenOption.WRITE
 import kotlin.io.path.exists
 
 /**
@@ -23,6 +25,20 @@ class BitIds(path: Path) : BinFile(path) {
     fun findFirstZeroId(): Int {
         if (!path.exists()) return 0
         return findFirstZeroBit()
+    }
+
+    /**
+     * Резервирует первый доступный идентификатор (ID).
+     *
+     * @return Индекс зарезервированного ID (позиция бита).
+     */
+    fun getId(): Int {
+        FileChannel.open(path, READ, WRITE, CREATE).use { channel ->
+            val bitPosition = findFirstZeroBit(channel)
+            val bytePosition = (bitPosition / 8).toLong()
+            updateByte(channel, bytePosition) { updateBit(bitPosition, it, true) }
+            return bitPosition
+        }
     }
 
     /**

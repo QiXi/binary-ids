@@ -53,11 +53,19 @@ open class BinFile(val path: Path) {
      */
     fun writeByte(position: Long, byte: Int) {
         FileChannel.open(path, WRITE, CREATE).use { channel ->
-            val buffer = ByteBuffer.allocate(1)
-            buffer.put(byte.toByte())
-            buffer.flip()
-            channel.write(buffer, position)
+            writeByte(channel, position, byte)
         }
+    }
+
+    /**
+     * Вспомогательный метод для записи байта в уже открытый канал.
+     * Позволяет избежать повторного открытия дескриптора файла.
+     */
+    internal fun writeByte(channel: FileChannel, position: Long, byte: Int) {
+        val buffer = ByteBuffer.allocate(1)
+        buffer.put(byte.toByte())
+        buffer.flip()
+        channel.write(buffer, position)
     }
 
     /**
@@ -71,27 +79,31 @@ open class BinFile(val path: Path) {
      */
     fun updateByte(position: Long, modify: (byte: Int) -> Int): Boolean {
         FileChannel.open(path, READ, WRITE, CREATE).use { channel ->
-            val buffer = ByteBuffer.allocate(1)
-            val readResult = channel.read(buffer, position)
-            if (readResult == -1) {
-                buffer.clear()
-                buffer.put(128.toByte())
-                buffer.flip()
-                channel.write(buffer, position)
-                return true
-            }
+            return updateByte(channel, position, modify = modify)
+        }
+    }
+
+    internal fun updateByte(channel: FileChannel, position: Long, modify: (byte: Int) -> Int): Boolean {
+        val buffer = ByteBuffer.allocate(1)
+        val readResult = channel.read(buffer, position)
+        if (readResult == -1) {
+            buffer.clear()
+            buffer.put(128.toByte())
             buffer.flip()
-            val currentByte = buffer.get().toInt() and 0xFF
-            val newByte = modify(currentByte)
-            return if (newByte != currentByte) {
-                buffer.clear()
-                buffer.put(newByte.toByte())
-                buffer.flip()
-                channel.write(buffer, position)
-                true
-            } else {
-                false
-            }
+            channel.write(buffer, position)
+            return true
+        }
+        buffer.flip()
+        val currentByte = buffer.get().toInt() and 0xFF
+        val newByte = modify(currentByte)
+        return if (newByte != currentByte) {
+            buffer.clear()
+            buffer.put(newByte.toByte())
+            buffer.flip()
+            channel.write(buffer, position)
+            true
+        } else {
+            false
         }
     }
 
@@ -103,30 +115,34 @@ open class BinFile(val path: Path) {
     fun findFirstZeroBit(): Int {
         if (path.fileSize() == 0L) return 0
         FileChannel.open(path, READ).use { channel ->
-            val buffer = ByteBuffer.allocateDirect(DEFAULT_BUFFER_SIZE)
-            var byteOffset = 0
-            while (channel.read(buffer) != -1) {
-                buffer.flip()
-                while (buffer.remaining() >= 8) {
-                    val value = buffer.long
-                    if (value != -1L) { // Если в 64 битах есть хотя бы один ноль
-                        val bitPos = value.inv().countLeadingZeroBits()
-                        return (byteOffset * 8) + bitPos
-                    }
-                    byteOffset += 8
-                }
-                while (buffer.hasRemaining()) {
-                    val byte = buffer.get().toInt() and 0xFF
-                    if (byte != 0xFF) {
-                        val bitPos = Integer.numberOfLeadingZeros(byte.inv() and 0xFF) - 24
-                        return (byteOffset * 8) + bitPos
-                    }
-                    byteOffset++
-                }
-                buffer.clear()
-            }
-            return byteOffset * 8
+            return findFirstZeroBit(channel)
         }
+    }
+
+    internal fun findFirstZeroBit(channel: FileChannel): Int {
+        val buffer = ByteBuffer.allocateDirect(DEFAULT_BUFFER_SIZE)
+        var byteOffset = 0
+        while (channel.read(buffer) != -1) {
+            buffer.flip()
+            while (buffer.remaining() >= 8) {
+                val value = buffer.long
+                if (value != -1L) { // Есть хотя бы один 0 в 64 битах
+                    val bitPosInLong = value.inv().countLeadingZeroBits()
+                    return (byteOffset * 8) + bitPosInLong
+                }
+                byteOffset += 8
+            }
+            while (buffer.hasRemaining()) {
+                val byte = buffer.get().toInt() and 0xFF
+                if (byte != 0xFF) { // Есть хотя бы один 0 в байте
+                    val bitPos = Integer.numberOfLeadingZeros(byte.inv() and 0xFF) - 24
+                    return (byteOffset * 8) + bitPos
+                }
+                byteOffset++
+            }
+            buffer.clear()
+        }
+        return byteOffset * 8
     }
 
 }

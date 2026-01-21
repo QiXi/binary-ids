@@ -6,6 +6,7 @@ import ru.qixi.binary.BitIds
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
+import kotlin.random.Random
 
 @State(Scope.Thread)
 @BenchmarkMode(Mode.AverageTime)
@@ -14,13 +15,14 @@ open class BitIdsPerformanceTest {
 
     private lateinit var tempPath: Path
     private lateinit var bitIds: BitIds
+    private val fileSize = 1024 * 1024L // 1 MB
 
     @Setup
     fun setup() {
         tempPath = Files.createTempFile("perf_test", ".bin")
         bitIds = BitIds(tempPath)
         // Предварительно заполняем файл данными (1 МБ)
-        val data = ByteArray(1024 * 1024) { 0xFF.toByte() }
+        val data = ByteArray(fileSize.toInt()) { 0xFF.toByte() }
         // Оставляем один нулевой бит в самом конце
         data[data.size - 1] = 0xFE.toByte()
         Files.write(tempPath, data)
@@ -51,6 +53,11 @@ open class BitIdsPerformanceTest {
      * Тест последовательного чтения всех ID.
      */
     @Benchmark
+    fun benchmarkGetId(): Int {
+        return bitIds.getId()
+    }
+
+    @Benchmark
     fun benchmarkReadIds(bh: Blackhole) {
         bitIds.readIds { id ->
             bh.consume(id)
@@ -62,7 +69,7 @@ open class BitIdsPerformanceTest {
      */
     @Benchmark
     fun benchmarkRandomUpdateBit() {
-        val randomId = (0 until 1024 * 1024 * 8).random()
-        bitIds.update(randomId, randomId % 2 == 0)
+        val randomId = Random.nextLong(fileSize)
+        bitIds.update(randomId.toInt(), true)
     }
 }
