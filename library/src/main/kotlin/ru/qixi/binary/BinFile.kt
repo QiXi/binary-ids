@@ -7,7 +7,8 @@ import java.nio.file.StandardOpenOption.*
 import kotlin.io.path.exists
 import kotlin.io.path.fileSize
 
-internal const val DEFAULT_BUFFER_SIZE: Int = 16 * 1024
+const val DEFAULT_BUFFER_SIZE: Int = 16 * 1024
+internal const val BITS_PER_BYTE = 8
 
 /**
  * Класс для низкоуровневой работы с бинарными файлами.
@@ -128,7 +129,7 @@ open class BinFile(val path: Path) {
                 val value = buffer.long
                 if (value != -1L) { // Есть хотя бы один 0 в 64 битах
                     val bitPosInLong = value.inv().countLeadingZeroBits()
-                    return (byteOffset * 8) + bitPosInLong
+                    return (byteOffset * BITS_PER_BYTE) + bitPosInLong
                 }
                 byteOffset += 8
             }
@@ -136,7 +137,7 @@ open class BinFile(val path: Path) {
                 val byte = buffer.get().toInt() and 0xFF
                 if (byte != 0xFF) { // Есть хотя бы один 0 в байте
                     val bitPos = Integer.numberOfLeadingZeros(byte.inv() and 0xFF) - 24
-                    return (byteOffset * 8) + bitPos
+                    return (byteOffset * BITS_PER_BYTE) + bitPos
                 }
                 byteOffset++
             }

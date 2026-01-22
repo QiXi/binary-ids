@@ -10,7 +10,7 @@ import kotlin.random.Random
 
 @State(Scope.Thread)
 @BenchmarkMode(Mode.AverageTime)
-@OutputTimeUnit(TimeUnit.MILLISECONDS)
+@OutputTimeUnit(TimeUnit.MICROSECONDS)
 open class BitIdsPerformanceTest {
 
     private lateinit var tempPath: Path

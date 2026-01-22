@@ -35,7 +35,7 @@ class BitIds(path: Path) : BinFile(path) {
     fun getId(): Int {
         FileChannel.open(path, READ, WRITE, CREATE).use { channel ->
             val bitPosition = findFirstZeroBit(channel)
-            val bytePosition = (bitPosition / 8).toLong()
+            val bytePosition = (bitPosition / BITS_PER_BYTE).toLong()
             updateByte(channel, bytePosition) { updateBit(bitPosition, it, true) }
             return bitPosition
         }
@@ -76,7 +76,7 @@ class BitIds(path: Path) : BinFile(path) {
      */
     fun contains(id: Int): Boolean {
         if (!path.exists() || id < 0) return false
-        val position = (id / 8).toLong()
+        val position = (id / BITS_PER_BYTE).toLong()
         val byte = readByte(position)
         if (byte == -1) return false
         return isSetBit(byte, id)
@@ -90,7 +90,7 @@ class BitIds(path: Path) : BinFile(path) {
      */
     fun update(id: Int, state: Boolean): Boolean {
         if (id < 0) return false
-        val position = (id / 8).toLong()
+        val position = (id / BITS_PER_BYTE).toLong()
         return if (path.exists()) {
             updateByte(position) { updateBit(id, it, state) }
         } else {
@@ -108,29 +108,51 @@ class BitIds(path: Path) : BinFile(path) {
     }
 
     /**
-     * Итерируется по всем занятым ID (установленным битам) в файле и вызывает [action] для каждого.
+     * Итерируется по всем занятым ID в файле и вызывает [action] для каждого.
+     *
+     * @param action Функция обработки найденного ID.
      */
-    fun readIds(action: (Int) -> Unit) {
+    inline fun readIds(action: (Int) -> Unit) {
         if (!path.exists()) return
         FileChannel.open(path, READ).use { channel ->
-            val buffer = ByteBuffer.allocate(DEFAULT_BUFFER_SIZE)
-            var byteIndex = 0
+            val buffer = ByteBuffer.allocateDirect(DEFAULT_BUFFER_SIZE)
+            var byteOffset = 0
             while (channel.read(buffer) != -1) {
                 buffer.flip()
+                while (buffer.remaining() >= 8) {
+                    val value = buffer.long
+                    if (value != 0L) { // Пропускаем пустые 64 бита мгновенно
+                        processBits(value, byteOffset, action)
+                    }
+                    byteOffset += 8
+                }
                 while (buffer.hasRemaining()) {
                     val byte = buffer.get().toInt() and 0xFF
                     if (byte != 0) {
-                        for (bitPos in 0..7) {
-                            if ((byte and (0x80 shr bitPos)) != 0) {
-                                action(byteIndex * 8 + bitPos)
-                            }
-                        }
+                        processBits(byte.toLong() shl 56, byteOffset, action)
                     }
-                    byteIndex++
+                    byteOffset++
                 }
                 buffer.clear()
             }
         }
     }
 
+    /**
+     * Извлекает индексы установленных бит из 64-битного числа.
+     *
+     * @param bits 64-битное значение для анализа.
+     * @param offset Текущее смещение байта в файле.
+     * @param action Функция обработки найденного ID.
+     */
+    inline fun processBits(bits: Long, offset: Int, action: (Int) -> Unit) {
+        var temp = bits
+        while (temp != 0L) {
+            // Находим количество нулей перед первой единицей слева (интринсик процессора)
+            val leadingZeros = java.lang.Long.numberOfLeadingZeros(temp)
+            action(offset * 8 + leadingZeros)
+            // Сбрасываем найденный бит и продолжаем
+            temp = temp and (Long.MIN_VALUE ushr leadingZeros).inv()
+        }
+    }
 }
