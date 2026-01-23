@@ -104,6 +104,42 @@ bitIds.readIds { id ->
 
 ---
 
+## Пример использования
+
+```kotlin
+    // Инициализация менеджеров ID для разных типов сущностей
+    val userIds = BitIds(storagePath("users.ids"))
+    val movieIds = BitIds(storagePath("movies.ids"))
+    
+    // Регистрация ID (либо использование существующих ID)
+    val aliceId = userIds.getId()        // Alice получает ID 0
+    val movieAvatarId = movieIds.getId() // Аватар получает ID 0
+    val movieMatrixId = movieIds.getId() // Матрица получает ID 1
+    
+    // Создание файла для хранения связей (избранное Alice)
+    val aliceFavorites = BitIds(storagePath("user_${aliceId}_favorites.ids"))
+    
+    // Добавление связей (установка битов в файле избранного)
+    aliceFavorites.update(movieAvatarId, true)
+    aliceFavorites.update(movieMatrixId, true)
+    
+    println("Проверка наличия фильма 'Аватар' в избранном у Alice:")
+    println("Содержит ID $movieAvatarId? ${aliceFavorites.contains(movieAvatarId)}") // true
+    
+    print("Все избранные фильмы Alice (ID): ")
+    // Чтение всех установленных ID
+    aliceFavorites.readIds { id -> print("$id ") } // Выведет 0 1
+    
+    // Демонстрация другого сценария: хранение списка друзей
+    val bobId = userIds.getId() // Bob получает ID 1
+    val aliceFriends = BitIds(storagePath("user_${aliceId}_friends.ids"))
+    aliceFriends.update(bobId, true) // Alice добавляет Bob'а в друзья
+    
+    println("У Alice в друзьях Bob (ID $bobId)? ${aliceFriends.contains(bobId)}") // true
+```
+
+---
+
 ## 📈 Технические детали реализации
 
 *   **Формат файла**: Чистый бинарный массив (Bitmap). Отсутствие заголовков (headers) обеспечивает 100% полезную нагрузку.

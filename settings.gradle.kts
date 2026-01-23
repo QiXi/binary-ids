@@ -5,5 +5,4 @@ plugins {
 rootProject.name = "binary-ids"
 
 include("library")
-include("example")
 include("benchmarks")
